@@ -105,7 +105,7 @@ jobs:
           steps:
             - run:
                 name: Install dependencies (yarn)
-                command: cd projects/<< parameters.project >> && yarn install --frozen-lockfile --ignore-scripts
+                command: cd projects/<< parameters.project >> && yarn install --ignore-scripts
       - when:
           condition:
             equal: ["npm", << parameters.package_manager >>]
