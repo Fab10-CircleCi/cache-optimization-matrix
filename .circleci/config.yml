@@ -133,14 +133,18 @@ jobs:
     executor: go
     steps:
       - checkout
+      # v2-: cache keys are write-once - the old key's stale, oversized
+      # archive (full ~/go/pkg/mod) would otherwise keep getting restored
+      # forever, since save_cache no-ops when the key already exists. The
+      # version prefix forces a fresh save under the new, smaller paths.
       - restore_cache:
           keys:
-            - gomod-<< parameters.project >>-<< parameters.cache_key >>
+            - v2-gomod-<< parameters.project >>-<< parameters.cache_key >>
       - run:
           name: Download modules (go mod download)
           command: cd projects/<< parameters.project >> && go mod download
       - save_cache:
-          key: gomod-<< parameters.project >>-<< parameters.cache_key >>
+          key: v2-gomod-<< parameters.project >>-<< parameters.cache_key >>
           paths:
             # Only the compressed download cache, not the extracted module
             # tree under ~/go/pkg/mod - `go mod download` reconstructs the
