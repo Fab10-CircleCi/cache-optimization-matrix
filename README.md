@@ -15,8 +15,8 @@ dependency-install command and cache behavior is exercised.
 | flask, pydantic, black | Python (pip) | `pip install --user -r requirements.txt` | `~/.cache/pip` |
 | serde, rayon | Rust (cargo) | `cargo fetch` | `~/.cargo/registry` |
 | gson, guava | Java (maven) | `mvn dependency:resolve` | `~/.m2/repository` |
-| zod (yarn), rxjs (npm) | Node | `yarn install` / `npm ci` | `~/.cache/yarn`, `~/.npm` |
-| lo, hugo | Go | `go mod download` | `~/go/pkg/mod` |
+| zod (yarn), rxjs (npm) | Node | `yarn install` / `npm ci` | `~/.cache/yarn`, `~/.npm` (branch-scoped key) |
+| lo, hugo | Go | `go mod download` | `~/go/pkg/mod/cache/download` (compressed archives only) |
 
 ## Workflows
 
@@ -29,3 +29,13 @@ dependency-install command and cache behavior is exercised.
 
 Both workflows run on every push, so a single pipeline run gives a direct
 before/after timing comparison across all 11 projects.
+
+## Known issues found and fixed
+
+- **hugo's cache was ~8x oversized** (1.6GB) from caching both the extracted
+  module tree and the compressed download cache under `~/go/pkg/mod`. Fixed
+  by caching only `~/go/pkg/mod/cache/download`.
+- **zod's cache raced across branches**: an unscoped key let concurrent
+  branches computing the same checksum contend for the same cache object,
+  leaving it unreadable on the next run. Fixed by scoping the node job's
+  cache key to `<< pipeline.git.branch >>`.

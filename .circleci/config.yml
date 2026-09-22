@@ -96,9 +96,14 @@ jobs:
     executor: node
     steps:
       - checkout
+      # Branch-scoped: an unscoped key let concurrent branches computing the
+      # same checksum (e.g. an unchanged yarn.lock) race on the same cache
+      # object, leaving it locked/unreadable for the next run. The fallback
+      # key still allows a partial restore within the same branch on a miss.
       - restore_cache:
           keys:
-            - << parameters.package_manager >>-<< parameters.project >>-<< parameters.cache_key >>
+            - << parameters.package_manager >>-<< parameters.project >>-<< pipeline.git.branch >>-<< parameters.cache_key >>
+            - << parameters.package_manager >>-<< parameters.project >>-<< pipeline.git.branch >>-
       - when:
           condition:
             equal: ["yarn", << parameters.package_manager >>]
@@ -114,7 +119,7 @@ jobs:
                 name: Install dependencies (npm)
                 command: cd projects/<< parameters.project >> && npm ci --ignore-scripts
       - save_cache:
-          key: << parameters.package_manager >>-<< parameters.project >>-<< parameters.cache_key >>
+          key: << parameters.package_manager >>-<< parameters.project >>-<< pipeline.git.branch >>-<< parameters.cache_key >>
           paths:
             - ~/.cache/yarn
             - ~/.npm
@@ -137,7 +142,11 @@ jobs:
       - save_cache:
           key: gomod-<< parameters.project >>-<< parameters.cache_key >>
           paths:
-            - ~/go/pkg/mod
+            # Only the compressed download cache, not the extracted module
+            # tree under ~/go/pkg/mod - `go mod download` reconstructs the
+            # extracted tree from this on demand, so caching both is pure
+            # duplication. This is what made hugo's cache ~8x oversized.
+            - ~/go/pkg/mod/cache/download
 
 workflows:
   # Naive cache key: '{{ epoch }}' changes every run, so restore_cache never
