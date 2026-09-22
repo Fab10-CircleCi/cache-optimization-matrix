@@ -63,6 +63,45 @@ jobs:
           paths:
             - ~/.cargo/registry
 
+  # Validates the "Cache Harmful" leaf: payload large vs actual need -> Yes.
+  # Injects a 300MB blob unrelated to the real dependency (serde's actual
+  # cargo fetch is ~1-3s) so restore/save overhead dwarfs the real work,
+  # simulating a cache that costs more than it saves.
+  rust-install-harmful:
+    parameters:
+      project:
+        type: string
+      cache_key:
+        type: string
+    executor: rust
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - harmful-<< parameters.project >>-<< parameters.cache_key >>
+      - run:
+          name: Fetch dependencies (cargo)
+          command: cd projects/<< parameters.project >> && cargo fetch
+      - run:
+          name: Inflate cache with an irrelevant 300MB blob
+          command: dd if=/dev/urandom of=~/.cargo/registry/junk-blob bs=1M count=300
+      - save_cache:
+          key: harmful-<< parameters.project >>-<< parameters.cache_key >>
+          paths:
+            - ~/.cargo/registry
+
+  # Control: same install, no cache steps at all - the "real" cost floor.
+  rust-install-nocache:
+    parameters:
+      project:
+        type: string
+    executor: rust
+    steps:
+      - checkout
+      - run:
+          name: Fetch dependencies (cargo)
+          command: cd projects/<< parameters.project >> && cargo fetch
+
   java-install:
     parameters:
       project:
@@ -186,3 +225,12 @@ workflows:
       - node-install:   {name: rxjs-optimized,     project: rxjs,     cache_key: '{{ checksum "projects/rxjs/package-lock.json" }}', package_manager: "npm"}
       - go-install:     {name: lo-optimized,       project: lo,       cache_key: '{{ checksum "projects/lo/go.sum" }}'}
       - go-install:     {name: hugo-optimized,     project: hugo,     cache_key: '{{ checksum "projects/hugo/go.sum" }}'}
+
+  # Synthetic experiment for the "Cache Harmful" leaf: serde's real install
+  # is ~1-3s, so a cache whose restore/save overhead exceeds that (via an
+  # injected irrelevant 300MB blob) should make total job time WORSE than
+  # having no cache at all.
+  harmful-cache:
+    jobs:
+      - rust-install-harmful: {name: serde-harmful, project: serde, cache_key: '{{ checksum "projects/serde/Cargo.toml" }}'}
+      - rust-install-nocache: {name: serde-nocache,  project: serde}
