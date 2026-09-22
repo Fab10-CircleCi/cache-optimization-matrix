@@ -112,7 +112,7 @@ jobs:
           steps:
             - run:
                 name: Install dependencies (npm)
-                command: cd projects/<< parameters.project >> && npm ci --ignore-scripts
+                command: cd projects/<< parameters.project >> && npm install --ignore-scripts
       - save_cache:
           key: << parameters.package_manager >>-<< parameters.project >>-<< parameters.cache_key >>
           paths:
