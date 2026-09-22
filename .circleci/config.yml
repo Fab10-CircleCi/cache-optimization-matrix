@@ -152,6 +152,43 @@ jobs:
             # duplication. This is what made hugo's cache ~8x oversized.
             - ~/go/pkg/mod/cache/download
 
+  # No-cache variants: no restore_cache/save_cache steps at all, to validate
+  # the "Add cache" leaf - what does a job pay, run after run, when it has
+  # no cache steps whatsoever (vs. baseline, which HAS steps but always
+  # misses, vs. optimized, which hits)?
+  rust-install-nocache:
+    parameters:
+      project:
+        type: string
+    executor: rust
+    steps:
+      - checkout
+      - run:
+          name: Fetch dependencies (cargo)
+          command: cd projects/<< parameters.project >> && cargo fetch
+
+  java-install-nocache:
+    parameters:
+      project:
+        type: string
+    executor: java
+    steps:
+      - checkout
+      - run:
+          name: Resolve dependencies (maven)
+          command: cd projects/<< parameters.project >> && mvn -q -B dependency:resolve
+
+  go-install-nocache:
+    parameters:
+      project:
+        type: string
+    executor: go
+    steps:
+      - checkout
+      - run:
+          name: Download modules (go mod download)
+          command: cd projects/<< parameters.project >> && go mod download
+
 workflows:
   # Naive cache key: '{{ epoch }}' changes every run, so restore_cache never
   # hits. This is the "cache key has a volatile token" leaf of the decision
@@ -186,3 +223,12 @@ workflows:
       - node-install:   {name: rxjs-optimized,     project: rxjs,     cache_key: '{{ checksum "projects/rxjs/package-lock.json" }}', package_manager: "npm"}
       - go-install:     {name: lo-optimized,       project: lo,       cache_key: '{{ checksum "projects/lo/go.sum" }}'}
       - go-install:     {name: hugo-optimized,     project: hugo,     cache_key: '{{ checksum "projects/hugo/go.sum" }}'}
+
+  # No restore_cache/save_cache steps at all - the "Add cache" leaf's
+  # starting condition. Compared against baseline (has steps, always
+  # misses) and optimized (has steps, hits) for the same 3 projects.
+  no-cache:
+    jobs:
+      - rust-install-nocache: {name: rayon-nocache, project: rayon}
+      - java-install-nocache: {name: guava-nocache, project: guava}
+      - go-install-nocache:   {name: hugo-nocache,  project: hugo}
