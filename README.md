@@ -1,41 +1,53 @@
 # cache-optimization-matrix
 
-A dependency-install cache test bed spanning 5 package-manager ecosystems, used
-to measure the before/after impact of cache-key strategy changes against the
-[Cache Optimization Candidate Tree](../circleci-cli).
+A test repo to measure how dependency caches behave in CircleCI, across 5
+package managers.
 
 ## Projects
 
-Each `projects/<name>` directory holds a minimal manifest/lockfile that pulls
-in the real published package for that project, so each ecosystem's actual
-dependency-install command and cache behavior is exercised.
+Each `projects/<name>` folder has a small manifest or lockfile that installs
+the real published package. This runs each ecosystem's real install command
+and cache.
 
 | Project | Ecosystem | Install command | Cache path |
 |---|---|---|---|
 | flask, pydantic, black | Python (pip) | `pip install --user -r requirements.txt` | `~/.cache/pip` |
 | serde, rayon | Rust (cargo) | `cargo fetch` | `~/.cargo/registry` |
 | gson, guava | Java (maven) | `mvn dependency:resolve` | `~/.m2/repository` |
-| zod (yarn), rxjs (npm) | Node | `yarn install` / `npm ci` | `~/.cache/yarn`, `~/.npm` (branch-scoped key) |
-| lo, hugo | Go | `go mod download` | `~/go/pkg/mod/cache/download` (compressed archives only) |
+| zod (yarn), rxjs (npm) | Node | `yarn install` / `npm ci` | `~/.cache/yarn`, `~/.npm` |
+| lo, hugo | Go | `go mod download` | `~/go/pkg/mod/cache/download` |
 
 ## Workflows
 
-- **`baseline`** — cache key is `{{ epoch }}` (changes every run → guaranteed
-  miss on every run). Models the "cache key has a volatile token" leaf of the
-  decision tree.
-- **`optimized`** — cache key is a checksum of the project's own
-  manifest/lockfile (stable across runs when dependencies don't change).
-  Models the "fully optimized" leaf.
+Both workflows run on every push, so one pipeline gives a side by side
+comparison.
 
-Both workflows run on every push, so a single pipeline run gives a direct
-before/after timing comparison across all 11 projects.
+- **`baseline`**: the cache key ends in `{{ epoch }}` and there is no
+  fallback key, so the cache never hits.
+- **`optimized`**: the cache key is a checksum of the project's lockfile or
+  manifest, so it hits on every run after the first one while dependencies
+  don't change.
 
-## Known issues found and fixed
+## What we found
 
-- **hugo's cache was ~8x oversized** (1.6GB) from caching both the extracted
-  module tree and the compressed download cache under `~/go/pkg/mod`. Fixed
-  by caching only `~/go/pkg/mod/cache/download`.
-- **zod's cache raced across branches**: an unscoped key let concurrent
-  branches computing the same checksum contend for the same cache object,
-  leaving it unreadable on the next run. Fixed by scoping the node job's
-  cache key to `<< pipeline.git.branch >>`.
+- **hugo:** caching only `~/go/pkg/mod/cache/download`, instead of all of
+  `~/go/pkg/mod`, cut the stored cache from 423 MiB to 232 MiB and the
+  restore time from 7.4s to 3.0s. We have not measured the extra time later
+  steps spend extracting modules, so we don't know yet if the job is faster
+  overall.
+- **Changing what a cache saves needs a new key.** `save_cache` skips a key
+  that already exists, so the hugo change only worked after we renamed the
+  key (`v2-`). The old cache stays in storage until the org's retention
+  period ends.
+- **rxjs:** using `npm install` instead of `npm ci` changed
+  `package-lock.json` during the install. The key is a checksum of that file,
+  so the saved key never matched the next restore. `npm ci` fixed it.
+- **zod (not explained):** during runs with several branches at the same
+  time, one save was skipped and the next run found no cache. Later, two runs
+  with no change to `yarn.lock` computed different checksums. We don't know
+  the cause, so we don't claim a fix.
+
+## Limits
+
+Only dependency caches were tested, with small projects and a small number
+of runs. Build, linter, and toolchain caches were not tested.

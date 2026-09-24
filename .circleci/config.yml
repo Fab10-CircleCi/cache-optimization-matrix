@@ -2,8 +2,8 @@ version: 2.1
 
 # Each ecosystem gets one parameterized job. `cache_key` is a full CircleCI
 # cache-key template string (e.g. '{{ checksum "path" }}' or '{{ epoch }}'),
-# passed in verbatim by the workflow and interpreted by CircleCI's own
-# templating engine at cache time - not evaluated here.
+# passed in verbatim by the workflow. CircleCI fills in the template at
+# cache time.
 
 executors:
   python:
@@ -96,14 +96,9 @@ jobs:
     executor: node
     steps:
       - checkout
-      # Branch-scoped: an unscoped key let concurrent branches computing the
-      # same checksum (e.g. an unchanged yarn.lock) race on the same cache
-      # object, leaving it locked/unreadable for the next run. The fallback
-      # key still allows a partial restore within the same branch on a miss.
       - restore_cache:
           keys:
-            - << parameters.package_manager >>-<< parameters.project >>-<< pipeline.git.branch >>-<< parameters.cache_key >>
-            - << parameters.package_manager >>-<< parameters.project >>-<< pipeline.git.branch >>-
+            - << parameters.package_manager >>-<< parameters.project >>-<< parameters.cache_key >>
       - when:
           condition:
             equal: ["yarn", << parameters.package_manager >>]
@@ -119,7 +114,7 @@ jobs:
                 name: Install dependencies (npm)
                 command: cd projects/<< parameters.project >> && npm ci --ignore-scripts
       - save_cache:
-          key: << parameters.package_manager >>-<< parameters.project >>-<< pipeline.git.branch >>-<< parameters.cache_key >>
+          key: << parameters.package_manager >>-<< parameters.project >>-<< parameters.cache_key >>
           paths:
             - ~/.cache/yarn
             - ~/.npm
@@ -133,10 +128,10 @@ jobs:
     executor: go
     steps:
       - checkout
-      # v2-: cache keys are write-once - the old key's stale, oversized
-      # archive (full ~/go/pkg/mod) would otherwise keep getting restored
-      # forever, since save_cache no-ops when the key already exists. The
-      # version prefix forces a fresh save under the new, smaller paths.
+      # v2-: save_cache skips a key that already exists, so the old archive
+      # (full ~/go/pkg/mod) kept being restored after the path change. The
+      # new prefix forces a fresh save. The old object stays in storage
+      # until the org's retention period ends.
       - restore_cache:
           keys:
             - v2-gomod-<< parameters.project >>-<< parameters.cache_key >>
@@ -147,15 +142,14 @@ jobs:
           key: v2-gomod-<< parameters.project >>-<< parameters.cache_key >>
           paths:
             # Only the compressed download cache, not the extracted module
-            # tree under ~/go/pkg/mod - `go mod download` reconstructs the
-            # extracted tree from this on demand, so caching both is pure
-            # duplication. This is what made hugo's cache ~8x oversized.
+            # tree. For hugo this cut the stored cache from 423 MiB to
+            # 232 MiB. Not yet measured: the time later steps spend
+            # extracting modules again.
             - ~/go/pkg/mod/cache/download
 
 workflows:
-  # Naive cache key: '{{ epoch }}' changes every run, so restore_cache never
-  # hits. This is the "cache key has a volatile token" leaf of the decision
-  # tree - guaranteed miss, cost wasted on save_cache with zero time benefit.
+  # Cache key ends in '{{ epoch }}' and there is no fallback prefix key, so
+  # restore_cache never hits. This is a key that changes every run.
   baseline:
     jobs:
       - python-install: {name: flask-baseline,    project: flask,    cache_key: "{{ epoch }}"}
@@ -170,9 +164,9 @@ workflows:
       - go-install:     {name: lo-baseline,       project: lo,       cache_key: "{{ epoch }}"}
       - go-install:     {name: hugo-baseline,     project: hugo,     cache_key: "{{ epoch }}"}
 
-  # Optimized cache key: checksum of the project's own manifest/lockfile.
-  # Stable across runs when dependencies don't change - hits on every run
-  # after the first, matching the "fully optimized" leaf.
+  # Cache key is a checksum of the project's own manifest or lockfile. It
+  # stays the same while dependencies don't change, so every run after the
+  # first one hits.
   optimized:
     jobs:
       - python-install: {name: flask-optimized,    project: flask,    cache_key: '{{ checksum "projects/flask/requirements.txt" }}'}
